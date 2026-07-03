@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>실시간 OX 퀴즈</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f4f6fb;
+      color: #111827;
+    }
+    .hidden { display: none !important; }
+    .app { max-width: 1100px; margin: 0 auto; padding: 20px; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
+    .brand { font-size: 24px; font-weight: 800; }
+    .badge { padding: 8px 12px; border-radius: 999px; background: #e5e7eb; font-size: 14px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .card { background: white; border-radius: 18px; padding: 18px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08); }
+    h1, h2, h3 { margin: 0 0 12px; }
+    label { display: block; margin: 10px 0 6px; font-weight: 700; }
+    input, textarea, select {
+      width: 100%; border: 1px solid #d1d5db; border-radius: 12px; padding: 12px;
+      font-size: 15px; background: #fff;
+    }
+    textarea { min-height: 150px; resize: vertical; }
+    button {
+      border: 0; border-radius: 12px; padding: 12px 14px; font-size: 15px; font-weight: 800;
+      cursor: pointer; background: #2563eb; color: white;
+    }
+    button.secondary { background: #4b5563; }
+    button.danger { background: #dc2626; }
+    button.success { background: #16a34a; }
+    button.light { background: #e5e7eb; color: #111827; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .muted { color: #6b7280; font-size: 14px; line-height: 1.5; }
+    .question-list { max-height: 320px; overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+    .question-item { padding: 12px; border-radius: 12px; background: #f9fafb; border: 1px solid #e5e7eb; }
+    .question-item.active { border-color: #2563eb; background: #eff6ff; }
+    .question-meta { font-size: 13px; color: #6b7280; margin-top: 4px; }
+    .big-question { font-size: clamp(24px, 5vw, 44px); font-weight: 900; text-align: center; line-height: 1.3; margin: 24px 0; }
+    .answer-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .answer-buttons button { height: 120px; font-size: 46px; }
+    .o-btn { background: #2563eb; }
+    .x-btn { background: #ef4444; }
+    .status-box { text-align: center; padding: 14px; border-radius: 14px; background: #f3f4f6; font-weight: 800; }
+    .timer { font-size: 38px; font-weight: 900; text-align: center; }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .stat { background: #f9fafb; border-radius: 14px; padding: 14px; text-align: center; }
+    .stat strong { display: block; font-size: 26px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px; border-bottom: 1px solid #e5e7eb; text-align: left; font-size: 14px; }
+    .result-correct { color: #16a34a; font-weight: 900; }
+    .result-wrong { color: #dc2626; font-weight: 900; }
+    .notice { padding: 12px; border-radius: 14px; background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; }
+    @media (max-width: 820px) {
+      .grid { grid-template-columns: 1fr; }
+      .app { padding: 14px; }
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .answer-buttons button { height: 96px; font-size: 38px; }
+      .stats { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="topbar">
+      <div class="brand">실시간 OX 퀴즈</div>
+      <div class="row">
+        <span id="modeBadge" class="badge"></span>
+        <button id="goStudent" class="light hidden">학생 화면</button>
+        <button id="goAdmin" class="light hidden">강사 화면</button>
+      </div>
+    </div>
+
+    <div id="firebaseNotice" class="notice hidden">
+      Firebase 설정값을 입력해야 실제 여러 기기에서 실시간으로 동작합니다. 현재는 브라우저 로컬 모드로 실행됩니다.
+    </div>
+
+    <section id="studentView" class="hidden">
+      <div id="nameCard" class="card">
+        <h2>학생 입장</h2>
+        <p class="muted">이름 또는 닉네임을 입력하고 참여하세요. 방 코드는 사용하지 않습니다.</p>
+        <label>닉네임</label>
+        <input id="studentName" placeholder="예: 민수" />
+        <br><br>
+        <button id="joinBtn">입장하기</button>
+      </div>
+
+      <div id="playCard" class="card hidden">
+        <div class="row" style="justify-content:space-between">
+          <div><strong id="helloName"></strong></div>
+          <div class="badge">참여자 <span id="studentCount">0</span>명</div>
+        </div>
+        <div class="timer" id="studentTimer">--</div>
+        <div class="big-question" id="studentQuestion">강사가 문제를 시작하면 여기에 표시됩니다.</div>
+        <div class="answer-buttons">
+          <button id="answerO" class="o-btn">O</button>
+          <button id="answerX" class="x-btn">X</button>
+        </div>
+        <br>
+        <div id="studentStatus" class="status-box">대기 중</div>
+        <div id="studentExplanation" class="muted" style="margin-top:12px"></div>
+      </div>
+    </section>
+
+    <section id="adminView" class="hidden">
+      <div class="grid">
+        <div class="card">
+          <h2>문제 불러오기</h2>
+          <p class="muted">구글시트/엑셀에서 복사 후 붙여넣기: 문제, 정답, 해설 순서 권장</p>
+          <textarea id="pasteBox" placeholder="예)\n지구는 태양 주위를 돈다\tO\t지구는 태양계 행성입니다.\n물은 항상 50도에서 끓는다\tX\t일반적으로 1기압에서 100도입니다."></textarea>
+          <div class="row" style="margin-top:10px">
+            <button id="loadQuestions">붙여넣기 불러오기</button>
+            <button id="clearQuestions" class="danger">문제 전체 삭제</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>AI 문제 생성</h2>
+          <p class="muted">API 없이 브라우저에서 간단 생성합니다. 교육 자료용은 반드시 사실 확인하세요.</p>
+          <label>주제</label>
+          <input id="aiTopic" placeholder="예: 과학 상식, 한국사, 인공지능" />
+          <label>난이도</label>
+          <select id="aiLevel">
+            <option>쉬움</option>
+            <option>보통</option>
+            <option>어려움</option>
+          </select>
+          <label>개수</label>
+          <select id="aiCount">
+            <option>5</option><option>10</option><option>15</option>
+          </select>
+          <br><br>
+          <button id="generateAI" class="success">자동 생성</button>
+        </div>
+      </div>
+
+      <div class="grid" style="margin-top:16px">
+        <div class="card">
+          <h2>문제 목록</h2>
+          <div id="questionList" class="question-list"></div>
+        </div>
+
+        <div class="card">
+          <h2>진행 컨트롤</h2>
+          <div class="stats">
+            <div class="stat"><span>현재 문제</span><strong id="currentNo">-</strong></div>
+            <div class="stat"><span>응답 수</span><strong id="answerCount">0</strong></div>
+            <div class="stat"><span>정답률</span><strong id="accuracy">-</strong></div>
+          </div>
+          <label>제한 시간</label>
+          <select id="timeLimit">
+            <option value="5">5초</option>
+            <option value="10" selected>10초</option>
+            <option value="15">15초</option>
+            <option value="20">20초</option>
+            <option value="0">제한 없음</option>
+          </select>
+          <br><br>
+          <div class="row">
+            <button id="startBtn">문제 시작</button>
+            <button id="showResultBtn" class="success">정답 공개</button>
+            <button id="nextBtn" class="secondary">다음 문제</button>
+            <button id="resetGameBtn" class="danger">게임 초기화</button>
+          </div>
+          <br>
+          <h3>현재 문제</h3>
+          <div id="adminCurrentQuestion" class="status-box">아직 시작하지 않았습니다.</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <h2>실시간 결과 / 랭킹</h2>
+        <table>
+          <thead><tr><th>이름</th><th>선택</th><th>결과</th><th>점수</th></tr></thead>
+          <tbody id="resultTable"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script type="module">
+
+    // 1) Firebase Console에서 받은 설정값으로 교체하세요.
+    // 2) 값이 비어 있으면 자동으로 LocalStorage 모드로 실행됩니다.
+    const firebaseConfig = {
+      apiKey: "",
+      authDomain: "",
+      databaseURL: "",
+      projectId: "",
+      storageBucket: "",
+      messagingSenderId: "",
+      appId: ""
+    };
+
+    const hasFirebase = firebaseConfig.apiKey && firebaseConfig.databaseURL;
+    let isAdmin = location.hash.includes("admin") || location.search.includes("admin");
+    const $ = (id) => document.getElementById(id);
+
+    const initialState = {
+      questions: [],
+      currentIndex: -1,
+      status: "waiting", // waiting, answering, result
+      answers: {},
+      players: {},
+      startedAt: 0,
+      timeLimit: 10
+    };
+
+    let state = structuredClone(initialState);
+    let db = null;
+    let rootRef = null;
+    const STORAGE_KEY = "ox_quiz_state_v2";
+    let studentId = sessionStorage.getItem("ox_student_id") || crypto.randomUUID();
+    sessionStorage.setItem("ox_student_id", studentId);
+    let tickTimer = null;
+
+    if (hasFirebase) {
+      try {
+        const appModule = await import("https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js");
+        const dbModule = await import("https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js");
+        window.firebaseFns = dbModule;
+        const app = appModule.initializeApp(firebaseConfig);
+        db = dbModule.getDatabase(app);
+        rootRef = dbModule.ref(db, "oxQuiz/defaultRoom");
+        dbModule.onValue(rootRef, (snapshot) => {
+          state = snapshot.val() || structuredClone(initialState);
+          render();
+        });
+      } catch (error) {
+        console.warn("Firebase 연결 실패. 로컬 모드로 전환합니다.", error);
+        startLocalMode();
+      }
+    } else {
+      startLocalMode();
+    }
+
+    function startLocalMode() {
+      $("firebaseNotice").classList.remove("hidden");
+      const saved = localStorage.getItem(STORAGE_KEY);
+      state = saved ? JSON.parse(saved) : structuredClone(initialState);
+      window.addEventListener("storage", () => {
+        const next = localStorage.getItem(STORAGE_KEY);
+        if (next) { state = JSON.parse(next); render(); }
+      });
+      render();
+    }
+
+    function save(next) {
+      state = { ...state, ...next };
+      if (hasFirebase && rootRef && window.firebaseFns) window.firebaseFns.update(rootRef, next);
+      else localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      render();
+    }
+
+    function fullSave(nextState) {
+      state = nextState;
+      if (hasFirebase && rootRef && window.firebaseFns) window.firebaseFns.set(rootRef, nextState);
+      else localStorage.setItem(STORAGE_KEY, JSON.stringify(nextState));
+      render();
+    }
+
+    function currentQuestion() {
+      return state.questions?.[state.currentIndex] || null;
+    }
+
+    function normalizeAnswer(value) {
+      const v = String(value || "").trim().toUpperCase();
+      if (["O", "TRUE", "참", "맞음", "YES", "Y"].includes(v)) return "O";
+      if (["X", "FALSE", "거짓", "틀림", "NO", "N"].includes(v)) return "X";
+      return v === "O" ? "O" : "X";
+    }
+
+    function parsePasted(text) {
+      return text.split("\n")
+        .map(line => line.trim())
+        .filter(Boolean)
+        .map((line, idx) => {
+          const parts = line.includes("\t") ? line.split("\t") : line.split(/[|,]/);
+          return {
+            id: crypto.randomUUID(),
+            text: (parts[0] || `문제 ${idx + 1}`).trim(),
+            answer: normalizeAnswer(parts[1] || "O"),
+            explanation: (parts[2] || "").trim()
+          };
+        })
+        .filter(q => q.text && (q.answer === "O" || q.answer === "X"));
+    }
+
+    function localAiQuestions(topic, level, count) {
+      const cleanTopic = topic.trim() || "일반 상식";
+      const templates = [
+        [`${cleanTopic}에서 가장 기본이 되는 개념은 하나만 존재한다.`, "X", "대부분의 주제는 여러 핵심 개념이 함께 작동합니다."],
+        [`${cleanTopic}를 배울 때 예시와 반례를 함께 보면 이해에 도움이 된다.`, "O", "예시와 반례는 개념을 구분하는 데 도움이 됩니다."],
+        [`${cleanTopic}에 대한 설명은 항상 시대와 맥락에 관계없이 동일하다.`, "X", "많은 지식은 맥락과 시대에 따라 해석이 달라질 수 있습니다."],
+        [`${cleanTopic} 학습에서는 용어의 정의를 먼저 확인하는 것이 중요하다.`, "O", "정의가 불명확하면 이후 설명도 흔들릴 수 있습니다."],
+        [`${cleanTopic} 문제를 풀 때 정답만 외우면 깊은 이해가 완성된다.`, "X", "정답보다 이유와 해설을 이해하는 것이 중요합니다."],
+        [`${cleanTopic}에 관한 OX 퀴즈는 빠른 진단 활동으로 사용할 수 있다.`, "O", "OX 퀴즈는 사전 지식 확인과 복습에 적합합니다."],
+        [`${level} 난이도의 ${cleanTopic} 문제는 학습자의 수준을 고려해야 한다.`, "O", "난이도 조절은 수업 참여도에 직접 영향을 줍니다."],
+        [`${cleanTopic}에서는 하나의 사례만으로 전체 원리를 단정해도 된다.`, "X", "하나의 사례만으로 일반화하면 오류가 생길 수 있습니다."],
+        [`${cleanTopic}를 설명할 때 질문을 던지는 방식은 참여를 높일 수 있다.`, "O", "질문은 학습자의 사고 참여를 유도합니다."],
+        [`${cleanTopic}에 대한 자료는 출처 확인 없이 교육 자료로 바로 써도 된다.`, "X", "교육 자료는 반드시 사실 확인과 출처 확인이 필요합니다."],
+        [`${cleanTopic} 학습 후 해설을 제공하면 오답 학습에 도움이 된다.`, "O", "해설은 왜 맞고 틀렸는지를 이해하게 합니다."],
+        [`${cleanTopic}를 게임으로 만들면 모든 학습자가 항상 같은 속도로 이해한다.`, "X", "학습 속도는 개인마다 다릅니다."],
+        [`${cleanTopic} 수업에서 실시간 결과를 보여주면 강사가 이해도를 파악할 수 있다.`, "O", "응답 분포는 수업 조정에 도움이 됩니다."],
+        [`${cleanTopic} 문제는 짧고 명확할수록 OX 퀴즈에 적합하다.`, "O", "문장이 길면 학생이 핵심을 놓치기 쉽습니다."],
+        [`${cleanTopic} 퀴즈에는 해설이 전혀 필요 없다.`, "X", "해설은 학습 효과를 높입니다."]
+      ];
+      return templates.slice(0, Number(count)).map(([text, answer, explanation]) => ({
+        id: crypto.randomUUID(), text, answer, explanation
+      }));
+    }
+
+    function remainingSeconds() {
+      if (state.status !== "answering" || !state.timeLimit) return null;
+      const elapsed = Math.floor((Date.now() - (state.startedAt || 0)) / 1000);
+      return Math.max(0, state.timeLimit - elapsed);
+    }
+
+    function autoEndIfNeeded() {
+      const left = remainingSeconds();
+      if (left === 0 && isAdmin && state.status === "answering") showResult();
+    }
+
+    function render() {
+      isAdmin = location.hash.includes("admin") || location.search.includes("admin");
+      $("modeBadge").textContent = isAdmin ? "강사 화면" : "학생 화면";
+      $("adminView").classList.toggle("hidden", !isAdmin);
+      $("studentView").classList.toggle("hidden", isAdmin);
+      $("goStudent").classList.toggle("hidden", !isAdmin);
+      $("goAdmin").classList.toggle("hidden", isAdmin);
+
+      if (isAdmin) renderAdmin(); else renderStudent();
+      if (!tickTimer) tickTimer = setInterval(() => { renderClock(); autoEndIfNeeded(); }, 300);
+    }
+
+    function renderClock() {
+      const left = remainingSeconds();
+      const text = left === null ? "--" : String(left);
+      if ($("studentTimer")) $("studentTimer").textContent = text;
+    }
+
+    function renderAdmin() {
+      const q = currentQuestion();
+      const list = $("questionList");
+      list.innerHTML = "";
+      (state.questions || []).forEach((item, idx) => {
+        const div = document.createElement("div");
+        div.className = "question-item" + (idx === state.currentIndex ? " active" : "");
+        div.innerHTML = `<strong>${idx + 1}. ${escapeHtml(item.text)}</strong><div class="question-meta">정답: ${item.answer} ${item.explanation ? "· 해설 있음" : ""}</div>`;
+        div.onclick = () => save({ currentIndex: idx, status: "waiting", answers: {} });
+        list.appendChild(div);
+      });
+      if (!state.questions?.length) list.innerHTML = `<p class="muted">아직 문제가 없습니다.</p>`;
+
+      $("currentNo").textContent = q ? `${state.currentIndex + 1}/${state.questions.length}` : "-";
+      $("adminCurrentQuestion").textContent = q ? q.text : "아직 시작하지 않았습니다.";
+      const answers = state.answers || {};
+      const players = state.players || {};
+      const rows = Object.entries(players).sort((a,b) => (b[1].score || 0) - (a[1].score || 0));
+      $("answerCount").textContent = Object.keys(answers).length;
+      const correctCount = q ? Object.values(answers).filter(a => a.answer === q.answer).length : 0;
+      $("accuracy").textContent = state.status === "result" && Object.keys(answers).length ? `${Math.round(correctCount / Object.keys(answers).length * 100)}%` : "-";
+      $("resultTable").innerHTML = rows.map(([id, p]) => {
+        const a = answers[id]?.answer || "-";
+        let result = "대기";
+        if (state.status === "result" && a !== "-") result = a === q?.answer ? `<span class="result-correct">정답</span>` : `<span class="result-wrong">오답</span>`;
+        return `<tr><td>${escapeHtml(p.name || "학생")}</td><td>${a}</td><td>${result}</td><td>${p.score || 0}</td></tr>`;
+      }).join("");
+    }
+
+    function renderStudent() {
+      const joinedName = localStorage.getItem("ox_student_name");
+      $("nameCard").classList.toggle("hidden", !!joinedName);
+      $("playCard").classList.toggle("hidden", !joinedName);
+      if (!joinedName) return;
+      const q = currentQuestion();
+      const myAnswer = state.answers?.[studentId]?.answer;
+      $("helloName").textContent = `${joinedName}님`;
+      $("studentCount").textContent = Object.keys(state.players || {}).length;
+      $("studentQuestion").textContent = q ? q.text : "강사가 문제를 시작하면 여기에 표시됩니다.";
+      const canAnswer = !!q && state.status === "answering" && !myAnswer;
+      $("answerO").disabled = !canAnswer;
+      $("answerX").disabled = !canAnswer;
+      let status = `상태: ${state.status === "answering" ? "답변 가능" : state.status === "result" ? "결과 공개" : "대기 중"}`;
+      let explanation = "";
+      if (state.status === "answering") status = myAnswer ? `${myAnswer} 제출 완료` : "O 또는 X를 선택하세요.";
+      if (state.status === "result" && q) {
+        if (myAnswer) status = myAnswer === q.answer ? `정답입니다! 정답: ${q.answer}` : `아쉽습니다. 정답: ${q.answer}`;
+        else status = `미응답. 정답: ${q.answer}`;
+        explanation = q.explanation || "";
+      }
+      $("studentStatus").textContent = status;
+      $("studentExplanation").textContent = explanation;
+    }
+
+    function startQuestion() {
+      if (!state.questions?.length) return alert("문제를 먼저 불러오세요.");
+      const index = state.currentIndex < 0 ? 0 : state.currentIndex;
+      save({ currentIndex: index, status: "answering", answers: {}, startedAt: Date.now(), timeLimit: Number($("timeLimit").value) });
+    }
+
+    function showResult() {
+      const q = currentQuestion();
+      if (!q) return;
+      const players = { ...(state.players || {}) };
+      Object.entries(state.answers || {}).forEach(([id, a]) => {
+        if (!players[id]) return;
+        if (a.answer === q.answer && !a.scored) players[id].score = (players[id].score || 0) + 1;
+      });
+      const answers = { ...(state.answers || {}) };
+      Object.keys(answers).forEach(id => answers[id].scored = true);
+      save({ status: "result", players, answers });
+    }
+
+    function nextQuestion() {
+      if (!state.questions?.length) return;
+      const next = Math.min(state.currentIndex + 1, state.questions.length - 1);
+      save({ currentIndex: next, status: "waiting", answers: {}, startedAt: 0 });
+    }
+
+    function submitAnswer(answer) {
+      if (state.status !== "answering") return;
+      const answers = { ...(state.answers || {}) };
+      if (answers[studentId]) return;
+      answers[studentId] = { answer, at: Date.now(), scored: false };
+      save({ answers });
+    }
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"]/g, s => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[s]));
+    }
+
+    $("goStudent").onclick = () => { history.replaceState(null, "", location.pathname + location.search); isAdmin = false; render(); };
+    $("goAdmin").onclick = () => { location.hash = "admin"; isAdmin = true; render(); };
+    window.addEventListener("hashchange", render);
+    $("loadQuestions").onclick = () => {
+      const qs = parsePasted($("pasteBox").value);
+      if (!qs.length) return alert("불러올 수 있는 문제가 없습니다. 문제와 정답 O/X를 함께 입력하세요.");
+      save({ questions: qs, currentIndex: 0, status: "waiting", answers: {} });
+    };
+    $("clearQuestions").onclick = () => {
+      if (confirm("문제를 모두 삭제할까요?")) save({ questions: [], currentIndex: -1, status: "waiting", answers: {} });
+    };
+    $("generateAI").onclick = () => {
+      const qs = localAiQuestions($("aiTopic").value, $("aiLevel").value, $("aiCount").value);
+      save({ questions: qs, currentIndex: 0, status: "waiting", answers: {} });
+    };
+    $("startBtn").onclick = startQuestion;
+    $("showResultBtn").onclick = showResult;
+    $("nextBtn").onclick = nextQuestion;
+    $("resetGameBtn").onclick = () => {
+      if (confirm("게임 상태와 점수를 초기화할까요? 문제 목록은 유지됩니다.")) {
+        save({ currentIndex: state.questions?.length ? 0 : -1, status: "waiting", answers: {}, players: {}, startedAt: 0 });
+      }
+    };
+    $("joinBtn").onclick = () => {
+      const name = $("studentName").value.trim();
+      if (!name) return alert("닉네임을 입력하세요.");
+      localStorage.setItem("ox_student_name", name);
+      const players = { ...(state.players || {}) };
+      players[studentId] = { name, score: players[studentId]?.score || 0, joinedAt: Date.now() };
+      save({ players });
+    };
+    $("answerO").onclick = () => submitAnswer("O");
+    $("answerX").onclick = () => submitAnswer("X");
+  </script>
+</body>
+</html>
